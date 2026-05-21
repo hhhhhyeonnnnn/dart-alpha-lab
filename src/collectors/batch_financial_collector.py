@@ -10,8 +10,11 @@ YEARS = ["2021", "2022", "2023", "2024"]
 REPORT_TYPE = "ANNUAL"
 OUTPUT_DIR = Path("data/processed")
 
-
-def load_companies(limit: int = 30) -> pd.DataFrame:
+def load_companies(limit: int = 50) -> pd.DataFrame:
+    """
+    corp_codes.csv에서 분석 대상 기업을 불러온다.
+    회사명보다 종목코드 기준으로 선택하는 것이 더 안정적이다.
+    """
     corp_codes_path = OUTPUT_DIR / "corp_codes.csv"
 
     if not corp_codes_path.exists():
@@ -26,24 +29,73 @@ def load_companies(limit: int = 30) -> pd.DataFrame:
     )
 
     df = df.dropna(subset=["corp_code", "stock_code"])
+    df["stock_code"] = df["stock_code"].astype(str).str.zfill(6)
     df = df[df["stock_code"].str.strip() != ""]
 
-    test_companies = [
-        "삼성전자",
-        "SK하이닉스",
-        "현대자동차",
-        "기아",
-        "NAVER",
-        "카카오",
-        "LG전자",
-        "POSCO홀딩스",
-        "삼성SDI",
-        "셀트리온",
+    preferred_stock_codes = [
+        "005930",  # 삼성전자
+        "000660",  # SK하이닉스
+        "005380",  # 현대자동차
+        "000270",  # 기아
+        "035420",  # NAVER
+        "035720",  # 카카오
+        "066570",  # LG전자
+        "005490",  # POSCO홀딩스
+        "006400",  # 삼성SDI
+        "068270",  # 셀트리온
+        "207940",  # 삼성바이오로직스
+        "012330",  # 현대모비스
+        "051910",  # LG화학
+        "028260",  # 삼성물산
+        "015760",  # 한국전력
+        "030200",  # KT
+        "096770",  # SK이노베이션
+        "034730",  # SK
+        "017670",  # SK텔레콤
+        "018260",  # 삼성에스디에스
+        "010130",  # 고려아연
+        "003550",  # LG
+        "009150",  # 삼성전기
+        "086280",  # 현대글로비스
+        "011200",  # HMM
+        "034020",  # 두산에너빌리티
+        "042700",  # 한미반도체
+        "012450",  # 한화에어로스페이스
+        "047050",  # 포스코인터내셔널
+        "003670",  # 포스코퓨처엠
+        "090430",  # 아모레퍼시픽
+        "011780",  # 금호석유화학
+        "010950",  # S-Oil
+        "010140",  # 삼성중공업
+        "329180",  # HD현대중공업
+        "010120",  # LS ELECTRIC
+        "011170",  # 롯데케미칼
+        "036570",  # 엔씨소프트
+        "251270",  # 넷마블
+        "352820",  # 하이브
+        "000720",  # 현대건설
+        "009540",  # HD한국조선해양
+        "267260",  # HD현대일렉트릭
+        "241560",  # 두산밥캣
+        "161390",  # 한국타이어앤테크놀로지
+        "271560",  # 오리온
+        "097950",  # CJ제일제당
+        "128940",  # 한미약품
+        "326030",  # SK바이오팜
+        "180640",  # 한진칼
     ]
+    selected_codes = preferred_stock_codes[:limit]
 
-    df = df[df["corp_name"].isin(test_companies)].copy()
+    selected_df = df[df["stock_code"].isin(selected_codes)].copy()
 
-    return df
+    found_codes = set(selected_df["stock_code"])
+    missing_codes = [code for code in selected_codes if code not in found_codes]
+
+    print(f"선택 기업 수: {len(selected_df)}")
+    if missing_codes:
+        print(f"corp_codes.csv에서 찾지 못한 종목코드: {missing_codes}")
+
+    return selected_df
 
 
 def fetch_company_year_financials(company: pd.Series, year: str) -> pd.DataFrame:
@@ -123,7 +175,7 @@ def collect_batch_financials(limit: int = 30) -> pd.DataFrame:
 def main():
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    final_df = collect_batch_financials(limit=30)
+    final_df = collect_batch_financials(limit=50)
 
     if final_df.empty:
         print("수집된 데이터가 없습니다.")

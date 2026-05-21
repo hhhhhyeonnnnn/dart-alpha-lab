@@ -1,15 +1,28 @@
 from pathlib import Path
-from datetime import datetime
 
 import pandas as pd
 
 
 FACTOR_PATH = Path("data/processed/profitability_factors_2021_2024.csv")
 PRICE_PATH = Path("data/processed/prices_2020_today.csv")
+FILING_PATH = Path("data/processed/annual_report_filing_dates_2021_2024.csv")
 OUTPUT_PATH = Path("data/processed/factor_forward_returns_3m.csv")
 
 
 HOLDING_DAYS = 63
+
+
+def parse_bool(value):
+    if pd.isna(value):
+        return pd.NA
+
+    if value is True or value == "True" or value == "true":
+        return True
+
+    if value is False or value == "False" or value == "false":
+        return False
+
+    return pd.NA
 
 
 def load_data() -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -18,6 +31,12 @@ def load_data() -> tuple[pd.DataFrame, pd.DataFrame]:
 
     if not PRICE_PATH.exists():
         raise FileNotFoundError(f"{PRICE_PATH} 파일이 없습니다.")
+
+    if not FILING_PATH.exists():
+        raise FileNotFoundError(
+            f"{FILING_PATH} 파일이 없습니다. "
+            "먼저 filing_date_collector.py를 실행하세요."
+        )
 
     factors = pd.read_csv(
         FACTOR_PATH,
@@ -34,40 +53,69 @@ def load_data() -> tuple[pd.DataFrame, pd.DataFrame]:
         },
     )
 
+    filings = pd.read_csv(
+        FILING_PATH,
+        dtype={
+            "corp_code": str,
+            "stock_code": str,
+        },
+    )
+
     factors["stock_code"] = factors["stock_code"].astype(str).str.zfill(6)
     prices["stock_code"] = prices["stock_code"].astype(str).str.zfill(6)
+    filings["stock_code"] = filings["stock_code"].astype(str).str.zfill(6)
+
+    factors["year"] = factors["year"].astype(int)
+    filings["year"] = filings["year"].astype(int)
+
+    factors["margin_improved"] = factors["margin_improved"].apply(parse_bool)
+
     prices["date"] = pd.to_datetime(prices["date"])
+    filings["filing_date"] = pd.to_datetime(filings["filing_date"])
 
-    return factors, prices
+    factors_with_filing = factors.merge(
+        filings[
+            [
+                "corp_code",
+                "stock_code",
+                "year",
+                "filing_date",
+                "rcept_no",
+                "report_nm",
+            ]
+        ],
+        on=["corp_code", "stock_code", "year"],
+        how="left",
+    )
 
-
-def get_signal_date(year: int) -> pd.Timestamp:
-    """
-    MVP에서는 사업보고서가 시장에 반영되는 시점을
-    다음 해 4월 1일로 임시 설정한다.
-
-    예:
-    2021년 실적 -> 2022-04-01 이후 진입
-    2022년 실적 -> 2023-04-01 이후 진입
-    """
-
-    return pd.Timestamp(datetime(year + 1, 4, 1))
+    return factors_with_filing, prices
 
 
 def calculate_forward_return(
     stock_prices: pd.DataFrame,
-    signal_date: pd.Timestamp,
+    filing_date: pd.Timestamp,
     holding_days: int = HOLDING_DAYS,
 ) -> dict | None:
-    stock_prices = stock_prices.sort_values("date").reset_index(drop=True)
+    """
+    실제 공시일 다음 거래일에 진입하고,
+    holding_days 거래일 후 청산한다.
 
-    after_signal = stock_prices[stock_prices["date"] >= signal_date].copy()
+    공시가 장중/장마감 이후 언제 나왔는지까지는 고려하지 않기 위해
+    보수적으로 '공시일 이후 첫 거래일'을 진입일로 사용한다.
+    """
 
-    if len(after_signal) <= holding_days:
+    if pd.isna(filing_date):
         return None
 
-    entry = after_signal.iloc[0]
-    exit_ = after_signal.iloc[holding_days]
+    stock_prices = stock_prices.sort_values("date").reset_index(drop=True)
+
+    after_filing = stock_prices[stock_prices["date"] > filing_date].copy()
+
+    if len(after_filing) <= holding_days:
+        return None
+
+    entry = after_filing.iloc[0]
+    exit_ = after_filing.iloc[holding_days]
 
     entry_price = entry["close"]
     exit_price = exit_["close"]
@@ -78,6 +126,7 @@ def calculate_forward_return(
     forward_return = (exit_price / entry_price) - 1
 
     return {
+        "filing_date": filing_date,
         "signal_date": entry["date"],
         "exit_date": exit_["date"],
         "entry_price": entry_price,
@@ -93,9 +142,6 @@ def build_forward_returns() -> pd.DataFrame:
 
     for _, row in factors.iterrows():
         stock_code = row["stock_code"]
-        year = int(row["year"])
-
-        signal_date = get_signal_date(year)
 
         stock_prices = prices[prices["stock_code"] == stock_code].copy()
 
@@ -104,7 +150,7 @@ def build_forward_returns() -> pd.DataFrame:
 
         return_info = calculate_forward_return(
             stock_prices=stock_prices,
-            signal_date=signal_date,
+            filing_date=row["filing_date"],
             holding_days=HOLDING_DAYS,
         )
 
@@ -177,11 +223,13 @@ def main():
         "operating_margin",
         "prev_operating_margin",
         "margin_improved",
+        "filing_date",
         "signal_date",
         "exit_date",
         "entry_price",
         "exit_price",
         "return_3m",
+        "report_nm",
     ]
 
     existing_cols = [col for col in preview_cols if col in result_df.columns]
