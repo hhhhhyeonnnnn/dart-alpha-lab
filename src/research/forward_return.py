@@ -152,7 +152,7 @@ def print_summary(result_df: pd.DataFrame) -> None:
 
     if not true_mean.empty and not false_mean.empty:
         diff = true_mean.iloc[0] - false_mean.iloc[0]
-        print(f"\n개선 기업 평균 - 미개선 기업 평균: {diff:.4f}")
+        print(f"\n개선 기업 평균 - 미개선 기업 평균: {diff * 100:.2f}%p")
 
 
 def main():
